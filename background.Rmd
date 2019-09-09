@@ -1,0 +1,15 @@
+---
+title: "Kerr Mess Around"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+```
+
+## Background
+
+This script explores Kerr Reservoir profile data and some upstream ambient trend site data. Scott gets repeated requests for data from DGIF for striper population inquiries and this tool may be expanded to statewide applicability in the future.
+
