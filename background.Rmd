@@ -4,12 +4,63 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(sf)
+library(readxl)
 ```
 
 ## Background
 
 This script explores Kerr Reservoir profile data and some upstream ambient trend site data. Scott gets repeated requests for data from DGIF for striper population inquiries and this tool may be expanded to statewide applicability in the future.
+
+## Data Pull (outside R)
+
+The below dataset was pulled outside of R (using Logi Lakes Field Data pull with BRRO 2010-Sept 2019 specified) because DEQ does not allow CEDS connection.
+
+Because Logi query only goes to .xls and has a lot of front matter, I saved original data pull in data/original and deleted front matter and saved each sheet in data/
+
+```{r data in BRRO}
+BRRO1 <- read_csv('data/BRRO2010_Sept2019_1.csv')
+BRRO2 <- read_csv('data/BRRO2010_Sept2019_2.csv')
+
+# Combine to one dataset
+BRRO <- bind_rows(BRRO1,BRRO2) %>%
+  filter_all(any_vars(!is.na(.)))  # clean up empty rows
+
+# clean up workspace
+rm(BRRO1);rm(BRRO2)
+
+# What stations available?
+unique(BRRO$ID)
+```
+
+
+So no Kerr available with BRRO data pull. Rinse and repeat with PRO.
+
+```{r data in PRO}
+PRO <- read_csv('data/PRO2010_Sept2019.csv') %>%
+  filter_all(any_vars(!is.na(.)))  # clean up empty rows
+
+# What stations available?
+unique(PRO$ID)
+```
+
+Limit to just Kerr Stations. kerrSites are from Paula's 2020 Stations table.
+
+```{r filter PRO}
+kerrSites <- c('4ABHB004.40', '4ABMA002.00', '4ABST001.13', '4ADAN000.00', '4AROA018.36', '4AROA022.52', '4AROA028.04', '4AROA032.42', '4AROA038.49', '4AROA043.14')
+
+
+Kerr <- filter(PRO, ID %in% kerrSites) %>%
+  bind_rows(filter(BRRO, ID %in% kerrSites))
+
+```
+
+
+The data pull isn't perfect because these sites still need to be pulled:
+```{r missing}
+# Sites that still need to be pulled
+kerrSites[!(kerrSites %in% unique(Kerr$ID))]
+```
 
