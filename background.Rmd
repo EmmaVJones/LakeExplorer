@@ -174,6 +174,8 @@ interpolateData <- function(data = data,
 }  
   
 
+int = int_WQX; reverseColorPalette = TRUE; criteria = 4
+
 contour.heatmap <- function(int = int,
                             reverseColorPalette = FALSE,
                             title = NA,
@@ -219,5 +221,75 @@ contour.heatmap(int_short, reverseColorPalette = TRUE, criteria = 4)
 
 So now let's try to scrape data straight from WQX to put into our plotting function.
 
+```{r webscrape}
+
+library(wqTools) # use Utah's webscraping function
+
+kerr1_nr <- readWQP(type="narrowresult", siteid="21VASWCB-4AROA038.49", print=F)
+kerr1_act <- readWQP(type="activity", siteid="21VASWCB-4AROA038.49", print=F)
+kerr1_nr_act <- merge(kerr1_nr, kerr1_act, all.x=T) %>%
+  filter(!is.na(ResultMeasureValue)) #Subset to profile data EVJ change to ResultMeasureValue to get populated data lines
+
+
+# function to simplify formatting
+WQX_wide <- function(data = data){
+   #make sure only one tz
+  if(length(unique(data$ActivityStartTime.TimeZoneCode)) == 1){  tz <- unique(data$ActivityStartTime.TimeZoneCode)
+  }else{
+    stop("More than one time zone present, clean data.")
+  }
+
+  # Get columns of interest
+  data1 <- dplyr::select(data, ActivityStartDate, ActivityStartTime.Time, ActivityStartTime.TimeZoneCode, MonitoringLocationIdentifier,
+                         CharacteristicName, ResultSampleFractionText, ResultMeasureValue, ResultMeasure.MeasureUnitCode, ActivityDepthHeightMeasure.MeasureValue,
+                         ActivityDepthHeightMeasure.MeasureUnitCode,ActivityLocation.LatitudeMeasure, ActivityLocation.LongitudeMeasure) %>%
+    mutate(CharacteristicName_unit = paste(CharacteristicName, ' [', ResultSampleFractionText,']',
+                                           ' (',ResultMeasure.MeasureUnitCode,')',sep = ''), #make one name for each parameter to not lose units
+           DateTime = as.POSIXct(paste(ActivityStartDate, ActivityStartTime.Time, sep = ' '), format = '%Y-%m-%d %H:%M:%S', tz = tz),
+           Depth = ActivityDepthHeightMeasure.MeasureValue) %>%
+    unite(SampleDate_Depth, DateTime, Depth, sep = '.._/_!_..')  # use unique string to avoid separation issues
+
+  
+  # Collapse a smaller version of this to not lose wide data 
+  data2 <- dplyr::select(data1, CharacteristicName_unit, SampleDate_Depth, ResultMeasureValue) %>%
+    distinct(CharacteristicName_unit, SampleDate_Depth, .keep_all = TRUE) %>%
+    # spread by activity (parameter collected)
+    spread(CharacteristicName_unit,ResultMeasureValue,  convert = TRUE, drop=FALSE) # convert = TRUE keeps original data format
+  
+  data3 <- dplyr::select(data1, SampleDate_Depth, MonitoringLocationIdentifier, ActivityLocation.LatitudeMeasure, ActivityLocation.LongitudeMeasure) %>%
+    distinct() %>%
+    left_join(data2, by='SampleDate_Depth') %>%
+    separate(SampleDate_Depth, c('DateTime', "Depth"), sep= '.._/_!_..') %>%
+    # update column types
+    mutate(DateTime = as.POSIXct(`DateTime`, format = '%Y-%m-%d %H:%M:%S', tz = tz),
+           Depth = as.numeric(Depth)) %>%
+    rename('LatitudeDD' = 'ActivityLocation.LatitudeMeasure',
+           'LongitudeDD' = 'ActivityLocation.LongitudeMeasure')
+  
+  return(data3)
+  
+  }
+
+zz <- WQX_wide(kerr1_nr_act)
+  
+```  
+  
+  
+  
+  
+
+```{r}
+# interpolate contours for DO
+int_WQX <- interpolateData(data = zz, # to adjust date range you need to limit input data
+                           dateCol = 'DateTime',
+                           dateTimeFormat = '%Y-%m-%d %H:%M:%S',
+                           depthCol = "Depth",
+                           parameterCol = 'Temperature, water [Total] (deg C)',
+                           depth_units = "m")
+
+contour.heatmap(int_WQX, reverseColorPalette = TRUE, criteria = 4)
+
+
+```
 
 
