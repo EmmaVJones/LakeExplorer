@@ -38,4 +38,6 @@ rsconnect/
 .Rproj
 *.csv
 *.xlsx
-/data
+/data/*
+/UtahLakeProfileDashboard/*
+
