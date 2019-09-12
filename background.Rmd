@@ -8,6 +8,7 @@ knitr::opts_chunk$set(echo = FALSE)
 library(tidyverse)
 library(sf)
 library(readxl)
+library(lubridate)
 ```
 
 ## Background
@@ -49,11 +50,17 @@ unique(PRO$ID)
 Limit to just Kerr Stations. kerrSites are from Paula's 2020 Stations table.
 
 ```{r filter PRO}
-kerrSites <- c('4ABHB004.40', '4ABMA002.00', '4ABST001.13', '4ADAN000.00', '4AROA018.36', '4AROA022.52', '4AROA028.04', '4AROA032.42', '4AROA038.49', '4AROA043.14')
+kerrSites <- read_csv('C:/HardDriveBackup/R/GitHub/LakesAssessment2020/app2020/LakeAssessmentApp_citmon/processedStationData/lakeStations2020_BRRO_citmonNonAgency.csv') %>%
+  filter(GNIS_Name == 'John H. Kerr Reservoir') %>%
+  filter(STATION_TYPE_1 == 'L' | STATION_TYPE_2 == 'L' | STATION_TYPE_3 == 'L') # keep only lake stations ( duplicated 4ABMA002.00 relic of assessment process)
 
 
-kerr <- filter(PRO, ID %in% kerrSites) %>%
-  bind_rows(filter(BRRO, ID %in% kerrSites))
+kerr <- filter(PRO, ID %in% kerrSites$FDT_STA_ID) %>%
+  bind_rows(filter(BRRO, ID %in% kerrSites)) %>%
+  rename('FDT_STA_ID' = 'ID') %>%
+  left_join(dplyr::select(kerrSites, FDT_STA_ID, Latitude, Longitude, SEC, CLASS, 
+                          SPSTDS, PWS, Trout, SEC187, Chlorophyll_A_limit,
+                          TPhosphorus_limit, Assess_TYPE), by = 'FDT_STA_ID')# join lat/lon information and WQS info
 
 ```
 
@@ -61,13 +68,67 @@ kerr <- filter(PRO, ID %in% kerrSites) %>%
 The data pull isn't perfect because these sites still need to be pulled:
 ```{r missing}
 # Sites that still need to be pulled
-kerrSites[!(kerrSites %in% unique(kerr$ID))]
+kerrSites$FDT_STA_ID[!(kerrSites$FDT_STA_ID %in% unique(kerr$FDT_STA_ID))]
 ```
+
+
+I pulled those individually from logi using the 'Field Data Station - McLeod' query limiting by Jan1 2010- Sept 9 2019. Below are efforts to first combine the sites...
+
+Also manually added in Location (CEDS station description) bc queries generated different fields
+
+```{r organize individual sites}
+X4ABHB004.40 <- read_csv('data/4ABHB004.40_Sept2019.csv')
+X4ABMA002.00 <- read_csv('data/4ABMA002.00_Sept2019.csv')
+X4ABST001.13 <- read_csv('data/4ABST001.13_Sept2019.csv')
+X4ADAN000.00 <- read_csv('data/4ADAN000.00_Sept2019.csv')
+X4AROA043.14 <- read_csv('data/4AROA043.14_Sept2019.csv')
+
+sites <- rbind(X4ABHB004.40, X4ABMA002.00, X4ABST001.13, X4ADAN000.00, X4AROA043.14) %>%
+  rename('FDT_STA_ID' = 'ID') %>%
+  dplyr::select(-c(Latitude, Longitude)) %>% # accept assessor-approved lat/lon
+  left_join(dplyr::select(kerrSites, FDT_STA_ID, STA_DESC, Latitude, Longitude, SEC, CLASS, 
+                          SPSTDS, PWS, Trout, SEC187, Chlorophyll_A_limit,
+                          TPhosphorus_limit, Assess_TYPE), by = 'FDT_STA_ID') %>%# join lat/lon information and WQS info
+  rename('Location' = 'STA_DESC')
+
+names(kerr)[!(names(kerr) %in% names(sites))] # make sure all fields we need to populate kerr are in sites
+
+sites <- dplyr::select(sites, names(kerr))
+```
+
+
+... and then combine the site datasets with the rest of the kerr lake profile data.
+
+
+```{r combine all kerr}
+
+kerr <- bind_rows(kerr,sites)
+
+# double check all of Paula's Kerr sites are in there
+all(unique(kerrSites$FDT_STA_ID) %in% unique(kerr$FDT_STA_ID))
+```
+
+Save Data.
+
+```{r}
+write.csv(kerr, 'data/Kerr2010-Sept2019.csv', row.names = F)
+```
+
+
+
+
+
+
+
+
+
+
+
 
 Get one profile to play with 4AROA022.52
 
 ```{r one profile}
-kerr1 <- filter(kerr, ID == '4AROA022.52')
+kerr1 <- filter(kerr, FDT_STA_ID == '4AROA022.52')
 
 kerr1DO <- select(kerr1, ID, `Date Time`, Depth, `Do Probe`)
 
@@ -264,32 +325,154 @@ WQX_wide <- function(data = data){
     mutate(DateTime = as.POSIXct(`DateTime`, format = '%Y-%m-%d %H:%M:%S', tz = tz),
            Depth = as.numeric(Depth)) %>%
     rename('LatitudeDD' = 'ActivityLocation.LatitudeMeasure',
-           'LongitudeDD' = 'ActivityLocation.LongitudeMeasure')
+           'LongitudeDD' = 'ActivityLocation.LongitudeMeasure')%>%
+  arrange(DateTime)
   
   return(data3)
   
   }
 
-zz <- WQX_wide(kerr1_nr_act)
-  
+zz <- WQX_wide(kerr1_nr_act) %>%
+  mutate(Year = year(DateTime))
+
+
+rm(kerr1_nr_act);rm(kerr1_nr);rm(kerr1_act)  
 ```  
   
-  
-  
+profiles avaialble for 1989, 1994, 2000, 2005, 2010, 2012, 2014, 2016, 2018, 2019
   
 
 ```{r}
 # interpolate contours for DO
-int_WQX <- interpolateData(data = zz, # to adjust date range you need to limit input data
+int_WQX <- interpolateData(data = filter(zz, Year==1989 & !is.na('Temperature, water [Total] (deg C)')), # to adjust date range you need to limit input data
                            dateCol = 'DateTime',
                            dateTimeFormat = '%Y-%m-%d %H:%M:%S',
                            depthCol = "Depth",
                            parameterCol = 'Temperature, water [Total] (deg C)',
                            depth_units = "m")
 
-contour.heatmap(int_WQX, reverseColorPalette = TRUE, criteria = 4)
+contour.heatmap(int_WQX, reverseColorPalette = FALSE, criteria = 20)
 
 
 ```
 
+Try with plotly
+
+```{r}
+library(plotly)
+
+#int3 <- readRDS('int_2010-2019_T.RDS')
+contour.heatmap(int3, reverseColorPalette = F, criteria = 30)
+
+
+plot_ly(x=int3[[2]]$x, y=int3[[2]]$y, z = int3[[2]]$z, type = "heatmap") %>%
+  layout(#xaxis = list(autorange = "reversed"),
+    yaxis = list(autorange = "reversed"))
+
+```
+
+Back to old fashioned plotly scatter plot with color gradient?
+
+```{r}
+plot_ly(data = zz, x = ~DateTime, y = ~Depth, 
+        color = ~`Temperature, water [Total] (deg C)`, size = 5) %>%
+  layout(yaxis = list(autorange = "reversed"))
+
+```
+
+
+```{r}
+plot_ly(data = zz3, x = ~DateTime, y = ~Depth, 
+        color = ~`Temperature, water [Total] (deg C)`, size = 5) %>%
+  layout(yaxis = list(autorange = "reversed"))
+
+```
+
+
+
+next step: kriging, could be applied to various depths across lake or by profile?
+
+https://rpubs.com/nabilabd/118172
+
+
+https://wlperry.github.io/bioblog/2017/12/25/lake-heat-maps-with-ggplot/
+
+```{r}
+#load packages
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(scales)
+library(colorRamps)
+library(akima)
+library(plotly)
+
+
+# clean up data
+zz_clean.df <- zz %>% # use this df for rest of commands
+  dplyr::select(Year, DateTime, Depth,`Temperature, water [Total] (deg C)`) %>%
+  filter(`Temperature, water [Total] (deg C)`>=0) %>% # select data that is greater or equal to 0
+  filter(!is.na(`Temperature, water [Total] (deg C)`)) %>%# remove all NA values
+  mutate(Date = as.Date(DateTime))
+
+```
+
+Too much time/space to interpolate all these windows at once, so restrict to 1989-1994, 2000-2005, 2010-2014, 2016-2019
+
+```{r}
+zz1989 <- filter(zz_clean.df, Year %in% 2018:2019) %>%
+  select(Date, Depth, `Temperature, water [Total] (deg C)`)
+
+#zz1989_1 <- zz1989
+int1989 <- interp(x = zz1989$Date,
+         y = zz1989$Depth,
+         z = zz1989$`Temperature, water [Total] (deg C)`,
+         xo = seq(min(zz1989$Date), max(zz1989$Date), by = 1),
+         yo = seq(min(zz1989$Depth), max(zz1989$Depth), by = 1),
+         extrap=FALSE,
+         linear=TRUE)
+
+
+# this converts the interpolated data into a dataframe
+interp.df <- interp2xyz(int1989, data.frame = TRUE)
+
+
+# clean up dates using dplyr
+interp.df <- interp.df %>%
+  filter(x %in% as.numeric(zz1989_1$Date)) %>% # this matches the interpolated data with what is in the main dataframe to remove dates we dont have
+  mutate(date = as_date(x)) %>% # interp turned dates into integers and this converts back
+  mutate(day = day(date)) %>% # create day varaible for plotting
+  mutate(year = year(date)) %>% # create a four digit year column
+  select(-x) %>% #remove x column
+  rename(depth=y, wtemp=z) #rename variables
+
+
+# plot our interpolated data
+ggplotly(ggplot(interp.df, aes(x = date, y = depth, z = wtemp, fill = wtemp)) +
+  geom_raster() +
+  scale_y_reverse(expand=c(0,0)) +
+  scale_fill_gradientn(colours=matlab.like(10), na.value = 'gray', name="Water\nTemp \nºC") + 
+  scale_x_date(date_breaks = "1 week", 
+               # limits = as_date(c('2016-12-06','2017-02-25')),
+               labels=date_format("%b-%d"), expand=c(0,0)) + 
+  ylab("Depth (m)") +
+  xlab("") )
+```
+
+
+```{r}
+# interolated watertemp with depth, linear
+# jsut a note here that the x interpretation step of 1 works with day data as it is using the 
+# number of days. The issue comes up when you want to use time. The thing to remember here is 
+# time in R is the number of seconds since 1970-01-01 00:00:00 so if you do hours you would use
+# 3600 seconds rather than 1
+zz_interp.df <- interp(x = zz_clean.df$DateTime,
+                       y = zz_clean.df$Depth,
+                       z = zz_clean.df$`Temperature, water [Total] (deg C)`,
+                       xo = seq(min(zz_clean.df$DateTime), max(zz_clean.df$DateTime), by = 1),
+                       yo = seq(min(zz_clean.df$Depth), max(zz_clean.df$Depth), by = 0.2),
+                       extrap=FALSE,
+                       linear=TRUE)
+
+```
 
