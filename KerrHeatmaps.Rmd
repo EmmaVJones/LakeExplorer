@@ -131,17 +131,6 @@ contour.heatmap(int_WQX, reverseColorPalette = FALSE, criteria = unique(X18.36$`
 Now make this a function so you can filter station, year, and parameter in one go.
 
 ```{r filter and int and heatmap function}
-rawData <- kerr
-stationFilter <- '4AROA018.36'
-yearFilter <- '2018'
-stationCol <- FDT_STA_ID
-dateCol <- 'Date'
-depthCol <- 'Depth'
-parameterCol <- 'Temp Celsius'
-criteriaCol <- 'Max Temperature (C)'
-dateFormat <- '%Y-%m-%d'
-
-
 int_heatmap <- function(rawData, 
                         stationFilter, 
                         yearFilter,
@@ -163,7 +152,7 @@ int_heatmap <- function(rawData,
   criteria <- as.numeric(unique(select(rawData, !!criteriaCol1)))
  
   # First check to make sure station and station column exist in dataset
-  if(!(as.character(stationCol1)[2] %in% names(rawData)) | 
+  if(suppressWarnings(!(as.character(stationCol1)[2] %in% names(rawData))) | 
      nrow(filter(rawData, !!stationCol1 %in% stationFilter)) == 0){
     stop('Make sure the station is in the station column and the station column is correctly called')
   }
@@ -193,17 +182,14 @@ int_heatmap <- function(rawData,
                               parameterCol = 'parameter',
                               depth_units = "m")
 
-  contour.heatmap(int_year, reverseColorPalette = reverseColorPalette, 
-                  criteria = criteria)
-
-  
-  
-  #return(dat)
-  #return(int_year)
-  
-  
+  suppressWarnings(contour.heatmap(int_year, reverseColorPalette = reverseColorPalette, 
+                  criteria = criteria))
 }
+```
 
+Try the function on a few sites and parameters.
+
+```{r testing}
 int_heatmap(kerr, stationFilter = '4AROA018.36', yearFilter = 2016, 
             stationCol = FDT_STA_ID,
             dateCol = Date, 
@@ -213,46 +199,38 @@ int_heatmap(kerr, stationFilter = '4AROA018.36', yearFilter = 2016,
             dateFormat= '%Y-%m-%d',
             reverseColorPalette = TRUE)
 
+int_heatmap(kerr, stationFilter = '4AROA022.52', yearFilter = 2012, 
+            stationCol = FDT_STA_ID,
+            dateCol = Date, 
+            depthCol = Depth, 
+            parameterCol = `Temp Celsius`, 
+            criteriaCol = `Max Temperature (C)`,
+            dateFormat= '%Y-%m-%d',
+            reverseColorPalette = FALSE)
 
+int_heatmap(kerr, stationFilter = '4AROA022.52', yearFilter = 2012, 
+            stationCol = FDT_STA_ID,
+            dateCol = Date, 
+            depthCol = Depth, 
+            parameterCol = `Field Ph`, 
+            criteriaCol = `pH Min`,
+            dateFormat= '%Y-%m-%d',
+            reverseColorPalette = TRUE)
 ```
 
+other testing 4AROA043.14, 4ABHB004.40, 4ABMA002.00, 4ABST001.13, 4ADAN000.00
+
+
 ```{r}
-int_heatmap <- function(rawData, 
-                        stationFilter, 
-                        yearFilter,
-                        stationCol,
-                        dateCol, 
-                        depthCol, 
-                        parameterCol, 
-                        criteriaCol, 
-                        dateFormat){
-  # First check to make sure station and station column exist in dataset
-  if(!(stationCol %in% names(rawData)) | 
-     
-     rawData[,deparse(stationCol)]
-     x[, deparse(col_name)]
-     
-     stationFilter %in% rawData$quote(stationCol)
-     unique(select(rawData, stationCol))
-  
-  # filter dataset by desired station
-  dat <- filter(rawData, get(stationCol) == stationFilter)
-  return(dat)
+int_heatmap(kerr, stationFilter = '4AROA43.14', yearFilter = 2012, 
+            stationCol = FDT_STA_ID,
+            dateCol = Date, 
+            depthCol = Depth, 
+            parameterCol = `Field Ph`, 
+            criteriaCol = `pH Min`,
+            dateFormat= '%Y-%m-%d',
+            reverseColorPalette = TRUE)
 
-
-z <- int_heatmap(kerr, stationFilter = '4AROA018.36',  stationCol = 'FDT_STA_ID')
-
-# interpolate contours for temp
-int_WQX <- interpolateData(data = filter(X18.36, Year==2018 & !is.na('Temp Celsius')), # to adjust date range you need to limit input data
-                           dateCol = 'Date',
-                           dateTimeFormat = '%Y-%m-%d',
-                           depthCol = "Depth",
-                           parameterCol = 'Temp Celsius',
-                           depth_units = "m")
-
-contour.heatmap(int_WQX, reverseColorPalette = FALSE, criteria = unique(X18.36$`Max Temperature (C)`))
-
-}
-
+View(filter(kerr, FDT_STA_ID== '4AROA043.14'))
 ```
 

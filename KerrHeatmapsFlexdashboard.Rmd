@@ -1,0 +1,245 @@
+---
+title: "Kerr Heatmaps Flexdashboard"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+
+# Built in R 3.6.1
+
+library(tidyverse)
+library(flexdashboard)
+library(crosstalk)
+library(plotly)
+library(DT)
+library(htmltools)
+library(lubridate)
+library(sf)
+library(mapview)
+library(inlmisc)
+
+# custom functions
+
+interpolateData <- function(data = data,
+                            dateCol = NA,
+                            dateTimeFormat = '%M-%D-%Y',
+                            depthCol= NA,
+                            parameterCol = NA,
+                            depth_units = NA){
+  data <- as.data.frame(data) # only work with dataframes, tibbles etc. are difficult for interpolation method
+  
+  # manipulate dataset to standardized format
+  data1 <- mutate(data, Date = as.Date(get(dateCol), format = dateTimeFormat),
+           Depth = get(depthCol),
+           parameter = get(parameterCol) ) %>%
+    dplyr::select(Date, Depth, parameter) %>% # just the columns we want
+    drop_na() # get rid of any missing data bc everything at this point is critical for interpolation
+  
+  # interpolate between sample events
+  int = akima::interp(data1[, 'Date'], data1[, 'Depth'], data1[, 'parameter'], duplicate = "strip", linear = TRUE)
+
+    results <- list(data1,int)
+  return(results)
+}  
+  
+
+contour.heatmap <- function(int = int,
+                            reverseColorPalette = FALSE,
+                            title = NA,
+                            criteria = NA,
+                            depth_units = "m"){
+  filled.contour(int[[2]], color.palette = function(n) topo.colors(n, rev= reverseColorPalette), 
+               xlim = c(min(int[[1]][, 'Date']) - 1, max(int[[1]][, 'Date']) + 1), 
+               ylim = rev(range(int[[1]][, 'Depth'])), 
+               ylab = paste0("Depth (", depth_units, ")"), 
+               main = title, 
+               plot.axes = {
+                 contour(int[[2]], levels = criteria, lwd = 2, col = "red", 
+                         drawlabels = TRUE, axes = FALSE, frame.plot = FALSE, 
+                         add = TRUE, labcex = 2)
+                 axis(1, at = unique(int[[1]][, 'Date']), labels = unique(int[[1]][,'Date']), par(las = 2))
+                 axis(2)}
+               )
+}
+
+int_heatmap <- function(rawData, 
+                        stationFilter, 
+                        yearFilter,
+                        stationCol,
+                        dateCol,
+                        depthCol,
+                        parameterCol,
+                        criteriaCol,
+                        dateFormat,
+                        reverseColorPalette){
+  # use non standard evaluation
+  stationCol1 <- suppressWarnings(enquo(stationCol))
+  parameterCol1 <- suppressWarnings(enquo(parameterCol))
+  dateCol1 <- suppressWarnings(enquo(dateCol))
+  depthCol1 <- suppressWarnings(enquo(depthCol))
+  criteriaCol1 <- suppressWarnings(enquo(criteriaCol))
+  
+  # establish criteria
+  criteria <- as.numeric(unique(select(rawData, !!criteriaCol1)))
+ 
+  # First check to make sure station and station column exist in dataset
+  if(suppressWarnings(!(as.character(stationCol1)[2] %in% names(rawData))) | 
+     nrow(filter(rawData, !!stationCol1 %in% stationFilter)) == 0){
+    stop('Make sure the station is in the station column and the station column is correctly called')
+  }
+  
+  
+  
+  # filter dataset by desired station and no NA's in parameter
+  dat <- filter(rawData, !!stationCol1 %in% stationFilter & !is.na(!!parameterCol1)) %>%
+    # make column names what we need for calculation
+    dplyr::select(!!dateCol1, !!depthCol1,!!parameterCol1) %>% # first order them to make it all work
+    rename(Date = !!names(.[1]),
+           Depth = !!names(.[2]),
+           parameter = !!names(.[3])) %>%
+    mutate(Year = year(!!dateCol1))  # make sure there is a year column
+  
+  # Make sure year is an option
+  if(!(yearFilter %in% unique(dat$Year))){
+    stop('Make sure you entered a valid year from dataset')
+  }
+  dat <- filter(dat, Year %in% yearFilter)
+  
+  # interpolate contours for parameter
+  int_year <- interpolateData(data = dat,
+                              dateCol = 'Date',
+                              dateTimeFormat = dateFormat,
+                              depthCol = "Depth",
+                              parameterCol = 'parameter',
+                              depth_units = "m")
+
+  suppressWarnings(contour.heatmap(int_year, reverseColorPalette = reverseColorPalette, 
+                  criteria = criteria))
+}
+
+
+```
+
+
+```{r data in,include=FALSE}
+kerr <- read_csv('data/Kerr2010-Sept2019.csv') %>%
+  mutate(Date = as.Date(`Date Time`, format = "%m/%d/%Y %l:%M %p"), # fix wonky date format
+         Year = year(Date)) # and make a year variable for easy filtering
+
+WQSvalues <- tibble(CLASS = c('I',"II","II","III","IV","V","VI","VII"),
+                    `Description Of Waters` = c('Open Ocean', 'Tidal Waters in the Chowan Basin and the Atlantic Ocean Basin',
+                                                'Tidal Waters in the Chesapeake Bay and its tidal tributaries',
+                                                'Nontidal Waters (Coastal and Piedmont Zone)','Mountainous Zone Waters',
+                                                'Stockable Trout Waters','Natural Trout Waters','Swamp Waters'),
+                    `Dissolved Oxygen Min (mg/L)` = c(5,4,NA,4,4,5,6,NA),
+                    `Dissolved Oxygen Daily Avg (mg/L)` = c(NA,5,NA,5,5,6,7,NA),
+                    `pH Min` = c(6,6,6.0,6.0,6.0,6.0,6.0,3.7),
+                    `pH Max` = c(9.0,9.0,9.0,9.0,9.0,9.0,9.0,8.0),
+                    `Max Temperature (C)` = c(NA, NA, NA, 32, 31, 21, 20, NA))
+
+kerr <- left_join(kerr, WQSvalues, by = 'CLASS')
+
+# first count depth per station
+kerr_depths <- dplyr::select(kerr, FDT_STA_ID, `Date Time`, Depth) %>%
+  group_by(FDT_STA_ID) %>%
+  summarize(maxDepth = max(Depth)) %>%
+  mutate(Profile = as.factor(ifelse(maxDepth > 0.3, 'Profile Available', 'Surface')))
+
+# spatial dataset
+kerr_sf <- distinct(kerr, FDT_STA_ID, .keep_all = T) %>%
+  left_join(kerr_depths, by = 'FDT_STA_ID') %>% # join depth info
+  dplyr::select(-c(Depth:`Do Optical`)) %>% # get rid of data
+  st_as_sf(coords = c('Longitude', 'Latitude'),
+           crs = 4326)
+
+
+# Crosstalk shared datasets for 'interactive' feel
+shared_raw_data <- SharedData$new(kerr, ~FDT_STA_ID, group = 'Choose Station')
+shared_sites_sf <- SharedData$new(kerr_sf, ~FDT_STA_ID, group = 'Choose Station' )
+
+```
+
+Sidebar {.sidebar}
+=====================================
+
+### Dataset Filters
+
+Choose a StationID and year to filter heatmaps.
+
+```{r filtering}
+bscols(
+  list(
+    filter_select("StationID", "Station ID", shared_raw_data, ~FDT_STA_ID)
+  )
+)
+
+```
+
+
+<br>
+
+Need help with the dashboard?
+<p><a href="https://mail.google.com/mail/?view=cm&fs=1&to=emma.jones@deq.virginia.gov">send email</a></p></span>
+
+
+
+Map {data-icon="fa-globe"}
+=====================================  
+
+Column {data-width=200}
+-------------------------------------
+
+
+### Lake Map
+
+```{r site map, echo=FALSE}
+
+mapview(kerr_sf, label=kerr_sf$FDT_STA_ID, zcol = 'Profile',
+        layer.name = 'DEQ Kerr Stations') # mapview doesnt work with crosstalk, yet
+```
+
+```{r webmap, eval=FALSE}
+CreateWebMap(maps = c("Topo","Imagery","Hydrography"), collapsed = TRUE) %>%
+  setView(-78, 37.5, zoom=6) %>%
+  addCircleMarkers(data=shared_sites_sf, color = ~Profile, radius = 5,
+                   #color='yellow', fillColor='blue', radius = 5,
+                   fillOpacity = 0.5,opacity=1,weight = 2,stroke=T,group="sites",
+                   label = ~FDT_STA_ID)%>%
+  inlmisc::AddHomeButton(raster::extent(-83.89, -74.80, 36.54, 39.98), position = "topleft") %>%
+  inlmisc::AddSearchButton(group = "sites", zoom = 15,propertyName = "label",
+                           textPlaceholder = "Search stations") %>%
+  addLayersControl(baseGroups=c("Topo","Imagery","Hydrography"),
+                       overlayGroups = c('sites'),
+                       options=layersControlOptions(collapsed=T),
+                       position='topleft')
+  
+
+
+```
+
+
+Lake Profile Heatmap {data-orientation=rows data-icon="fa-calculator"}
+=====================================  
+
+Column {data-width=200}
+-------------------------------------
+
+### Annual Heatmap
+
+```{r heatmap}
+int_heatmap(kerr, stationFilter = '4AROA022.52', yearFilter = 2012, 
+            stationCol = FDT_STA_ID,
+            dateCol = Date, 
+            depthCol = Depth, 
+            parameterCol = `Temp Celsius`, 
+            criteriaCol = `Max Temperature (C)`,
+            dateFormat= '%Y-%m-%d',
+            reverseColorPalette = TRUE)
+
+```
+
+
