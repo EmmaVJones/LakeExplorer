@@ -16,6 +16,31 @@ shinyServer(function(input, output, session) {
     years <- unique(stationData()$Year)
     selectInput('YearSelection', "Choose as year to plot", choices = years) })
   
+  # Max Temp UI output
+  output$UItempMax <- renderUI({
+    req(stationData())
+    numericInput('tempMax', 'Maximum Temperature Threshold',
+                 value = unique(stationData()$`Max Temperature (C)`))  })
+  
+  # DO Min UI output
+  output$UIDOMin <- renderUI({
+    req(stationData())
+    numericInput('DOMin', 'Minimum DO Threshold',
+                 value = unique(stationData()$`Dissolved Oxygen Min (mg/L)`))  })
+  
+  # Max pH UI output
+  output$UIpHMax <- renderUI({
+    req(stationData())
+    numericInput('pHMax', 'Maximum pH Threshold',
+                 value = unique(stationData()$`pH Max`))  })
+  
+  # Min pH UI output
+  output$UIpHMin <- renderUI({
+    req(stationData())
+    numericInput('pHMin', 'Minimum pH Threshold',
+                 value = unique(stationData()$`pH Min`))  })
+  
+  
   # Map 
   output$lakeMap <- renderLeaflet({
     mapview(kerr_sf, label=kerr_sf$FDT_STA_ID, zcol = 'Profile',
@@ -49,7 +74,28 @@ shinyServer(function(input, output, session) {
                 criteriaCol = criteriaSwitch,
                 dateFormat= '%Y-%m-%d',
                 reverseColorPalette = TRUE)
-    
-    
+  })
+  
+  output$selectedData <- DT::renderDataTable({
+    req(stationData())
+    DT::datatable(stationData(), rownames = F, escape = FALSE, extensions = 'Buttons',
+                  options= list(scrollX = TRUE, pageLength = nrow(stationData()), 
+                                scrollY = "250px", dom='Btf',
+                                buttons = list('copy')))
+  })
+  
+  # Habitable Width
+  output$habWidth <- renderPlotly({
+    req(stationData(), input$tempMax, input$DOMin, input$pHMax, input$pHMin)
+    habitableWidthPlot(dat= stationData(), 
+                       Tmax= input$tempMax, 
+                       DOmin= input$DOMin, 
+                       pHmax= input$pHMax, 
+                       pHmin= input$pHMin)
+    #habitableWidthPlot(dat= stationData(), 
+    #                   Tmax= as.numeric(input$tempMax), 
+    #                   DOmin= as.numeric(input$DOMin), 
+    #                   pHmax= as.numeric(input$pHMax), 
+    #                   pHmin= as.numeric(input$pHMin))
   })
 })

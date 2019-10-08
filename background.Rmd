@@ -60,7 +60,8 @@ kerr <- filter(PRO, ID %in% kerrSites$FDT_STA_ID) %>%
   rename('FDT_STA_ID' = 'ID') %>%
   left_join(dplyr::select(kerrSites, FDT_STA_ID, Latitude, Longitude, SEC, CLASS, 
                           SPSTDS, PWS, Trout, SEC187, Chlorophyll_A_limit,
-                          TPhosphorus_limit, Assess_TYPE), by = 'FDT_STA_ID')# join lat/lon information and WQS info
+                          TPhosphorus_limit, Assess_TYPE), by = 'FDT_STA_ID') %>% # join lat/lon information and WQS info
+  mutate(`Date Time` = as.POSIXct(`Date Time`, format = "%m/%d/%Y %l:%M %p"))
 
 ```
 
@@ -89,7 +90,8 @@ sites <- rbind(X4ABHB004.40, X4ABMA002.00, X4ABST001.13, X4ADAN000.00, X4AROA043
   left_join(dplyr::select(kerrSites, FDT_STA_ID, STA_DESC, Latitude, Longitude, SEC, CLASS, 
                           SPSTDS, PWS, Trout, SEC187, Chlorophyll_A_limit,
                           TPhosphorus_limit, Assess_TYPE), by = 'FDT_STA_ID') %>%# join lat/lon information and WQS info
-  rename('Location' = 'STA_DESC')
+  rename('Location' = 'STA_DESC') %>%
+  mutate(`Date Time` = as.POSIXct(`Date Time`, format='%m/%d/%Y'))
 
 names(kerr)[!(names(kerr) %in% names(sites))] # make sure all fields we need to populate kerr are in sites
 

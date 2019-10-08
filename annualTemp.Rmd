@@ -1,0 +1,166 @@
+---
+title: "mess with annual averages"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(plotly)
+library(dygraphs)
+library(lubridate)
+```
+
+Bring in Kerr data
+
+```{r, kerrData}
+kerr <- read_csv('data/Kerr2010-Sept2019.csv') %>%
+  mutate(Date = as.Date(`Date Time`, format = "%m/%d/%Y %l:%M %p"), # fix wonky date format
+         Year = year(Date), # and make a year variable for easy filtering
+         DO = ifelse(is.na(`Do Optical`), `Do Probe`, `Do Optical`)) # make one DO field
+
+WQSvalues <- tibble(CLASS = c('I',"II","II","III","IV","V","VI","VII"),
+                    `Description Of Waters` = c('Open Ocean', 'Tidal Waters in the Chowan Basin and the Atlantic Ocean Basin',
+                                                'Tidal Waters in the Chesapeake Bay and its tidal tributaries',
+                                                'Nontidal Waters (Coastal and Piedmont Zone)','Mountainous Zone Waters',
+                                                'Stockable Trout Waters','Natural Trout Waters','Swamp Waters'),
+                    `Dissolved Oxygen Min (mg/L)` = c(5,4,NA,4,4,5,6,NA),
+                    `Dissolved Oxygen Daily Avg (mg/L)` = c(NA,5,NA,5,5,6,7,NA),
+                    `pH Min` = c(6,6,6.0,6.0,6.0,6.0,6.0,3.7),
+                    `pH Max` = c(9.0,9.0,9.0,9.0,9.0,9.0,9.0,8.0),
+                    `Max Temperature (C)` = c(NA, NA, NA, 32, 31, 21, 20, NA))
+
+kerr <- left_join(kerr, WQSvalues, by = 'CLASS')
+
+kerr_depths <- dplyr::select(kerr, FDT_STA_ID, `Date Time`, Depth) %>%
+  group_by(FDT_STA_ID) %>%
+  summarize(maxDepth = max(Depth)) %>%
+  mutate(Profile = as.factor(ifelse(maxDepth > 0.3, 'Profile Available', 'Surface')))
+
+# spatial dataset
+kerr_sf <- distinct(kerr, FDT_STA_ID, .keep_all = T) %>%
+  left_join(kerr_depths, by = 'FDT_STA_ID') %>% # join depth info
+  dplyr::select(-c(Depth:`Do Optical`)) %>% # get rid of data
+  st_as_sf(coords = c('Longitude', 'Latitude'),
+           crs = 4326)
+
+```
+
+Work with just one station with profile data to find annual surface temperatures.
+
+```{r 18.36}
+kerr1 <- filter(kerr, FDT_STA_ID == '4AROA018.36')
+
+kerr1top <- filter(kerr1, Depth == 0.3) %>%
+  group_by(Year) %>%
+  summarize(YearAvgTop = mean(`Temp Celsius`))
+
+```
+
+
+Bring in full record from 4AROA018.36, separate CEDS pull using Field Parameters By Station Query
+```{r, 18.36 full}
+full <- readxl::read_excel('data/4AROA018.36_1970.xlsx')
+
+full_slim <- select(full, `Date Time`, Depth, `Temp Celsius`) %>%
+  filter(Depth == 0.3)
+
+library(tseries)
+
+full_slim1 <- irts(full_slim$`Date Time`, full_slim$`Temp Celsius`)
+
+dygraph(full_slim1) %>% dyRangeSelector()
+
+full_candlestick <- select(full, `Date Time`, Depth, `Temp Celsius`) %>%
+  filter(!is.na(`Temp Celsius`)) %>%
+  group_by(`Date Time`) %>%
+  mutate(max = max(`Temp Celsius`), min = min(`Temp Celsius`)) %>%
+  distinct(`Date Time`,.keep_all = T) %>%
+  select(-c(`Temp Celsius`)) 
+
+full_candlestick1 <- xts(x = full_candlestick[,3:4], order.by = full_candlestick$`Date Time`)
+
+dygraph(full_candlestick1 ) %>%
+  dyCandlestick()
+
+
+
+rm(full_slim1)
+```
+
+Dygraphs really need regular time series to look alright. Back to plotly.
+
+```{r}
+full_plotly <- select(full, `Date Time`, Depth, `Temp Celsius`) 
+
+plot_ly(full_plotly, x=~`Date Time`, y = ~`Temp Celsius`, type= 'box')
+
+```
+
+
+Change gears and figure out habitat width.
+
+```{r hab width}
+kerr1 <- filter(kerr, FDT_STA_ID == '4AROA018.36')
+
+
+kerr1 %>%
+  group_by(`Date Time`) %>%
+  filter(DO >= 5 & `Temp Celsius` >= 20 & `Field Ph` >= 4 & `Field Ph` <= 8) %>%
+  mutate(`Habitable Width` = abs(0- max(Depth))) %>%
+  View()
+
+# test plotting with some presets
+p <- kerr1 %>%
+  group_by(`Date Time`) %>%
+  filter(DO >= 5 & `Temp Celsius` >= 20 & `Field Ph` >= 4 & `Field Ph` <= 8) %>%
+  mutate(`Habitable Width` = abs(0- max(Depth))) %>%
+  distinct(`Date`,.keep_all=T) %>%
+  ungroup() %>%
+  group_by(Year)
+
+plot_ly(p) %>%#,x = ~`Date`, y= ~`Habitable Width`, type = 'scatter',
+        #marker = list(color = 'black')) %>%
+  add_trace(p, x = ~`Date`, y= ~`Habitable Width`, type = 'scatter', mode = 'lines+markers',
+            line = list(color = 'rgb(205, 12, 24)', width = 2,dash = 'dash'),
+            name = 'Habitable Width',
+                 hoverinfo = 'text', text = ~paste(sep = '<br>',
+                                             paste('Date:', `Date`),
+                                             paste('Habitable Width:',`Habitable Width`))) %>%
+  layout(yaxis = list(autorange = "reversed"))
+
+```
+
+Put in a function together
+
+```{r habitable width plot}
+
+habitableWidthPlot <- function(dat, Tmax, DOmin, pHmax, pHmin){
+  plotData <- dat %>%
+    group_by(`Date Time`) %>%
+    filter(DO >= DOmin & `Temp Celsius` <= Tmax & `Field Ph` >= pHmin & `Field Ph` <= pHmax) %>%
+    mutate(`Habitable Width` = abs(0- max(Depth))) %>%
+    distinct(`Date`,.keep_all=T) %>%
+    ungroup() %>%
+    group_by(Year)
+
+  
+  plot_ly(plotData) %>%
+  add_trace(x = ~`Date`, y= ~rev(`Habitable Width`), type = 'scatter', mode = 'lines+markers',
+            line = list(color = 'rgb(205, 12, 24)', width = 2,dash = 'dash'),
+            hoverinfo = 'text', text = ~paste(sep = '<br>',
+                                             paste('Date:', `Date`),
+                                             paste('Habitable Width:',`Habitable Width`)),
+            name = 'Habitable Width') %>%
+  layout(title = 'Habitable Width',
+    yaxis = list(#autorange = "reversed", # set rev() in add_trace to always plot 0 for scale
+                 range = c(~max(`Habitable Width`)+5, 0),
+                 title = 'Depth'),
+         xaxis = list(title = 'Date'))
+}
+
+habitableWidthPlot(dat= kerr1, Tmax= 20, DOmin= 3, pHmax= 9, pHmin= 7)
+
+```
+

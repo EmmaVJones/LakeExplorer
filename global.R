@@ -4,6 +4,7 @@ library(tidyverse)
 library(shiny)
 library(shinyjs)
 library(plotly)
+library(leaflet)
 library(DT)
 library(lubridate)
 library(sf)
@@ -156,4 +157,28 @@ int_heatmap <- function(rawData,
   
   suppressWarnings(contour.heatmap(int_year, reverseColorPalette = reverseColorPalette, 
                                    criteria = criteria))
+}
+
+
+habitableWidthPlot <- function(dat, Tmax, DOmin, pHmax, pHmin){
+  plotData <- dat %>%
+    group_by(`Date Time`) %>%
+    filter(DO >= DOmin & `Temp Celsius` <= Tmax & `Field Ph` >= pHmin & `Field Ph` <= pHmax) %>%
+    mutate(`Habitable Width` = abs(0- max(Depth))) %>%
+    distinct(`Date`,.keep_all=T) %>%
+    ungroup() %>%
+    group_by(Year)
+  
+  plot_ly(plotData) %>%
+    add_trace(x = ~`Date`, y= ~rev(`Habitable Width`), type = 'scatter', mode = 'lines+markers',
+              line = list(color = 'rgb(205, 12, 24)', width = 2,dash = 'dash'),
+              name = 'Habitable Width',
+              hoverinfo = 'text', text = ~paste(sep = '<br>',
+                                                paste('Date:', `Date`),
+                                                paste('Habitable Width:',`Habitable Width`))) %>%
+    layout(title = 'Habitable Width',
+           yaxis = list(#autorange = "reversed", # set rev() in add_trace to always plot 0 for scale
+             range = c(~max(`Habitable Width`)+5, 0),
+             title = 'Depth'),
+           xaxis = list(title = 'Date'))
 }

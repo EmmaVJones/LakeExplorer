@@ -20,7 +20,6 @@ This script explores Kerr Reservoir profile data. Data pulled from background.Rm
 kerr <- read_csv('data/Kerr2010-Sept2019.csv') %>%
   mutate(Date = as.Date(`Date Time`, format = "%m/%d/%Y %l:%M %p"), # fix wonky date format
          Year = year(Date)) # and make a year variable for easy filtering
-
 ```
 
 Join WQS criteria.
@@ -157,8 +156,6 @@ int_heatmap <- function(rawData,
     stop('Make sure the station is in the station column and the station column is correctly called')
   }
   
-  
-  
   # filter dataset by desired station and no NA's in parameter
   dat <- filter(rawData, !!stationCol1 %in% stationFilter & !is.na(!!parameterCol1)) %>%
     # make column names what we need for calculation
@@ -222,7 +219,12 @@ other testing 4AROA043.14, 4ABHB004.40, 4ABMA002.00, 4ABST001.13, 4ADAN000.00
 
 
 ```{r}
-int_heatmap(kerr, stationFilter = '4AROA43.14', yearFilter = 2012, 
+
+rawData <- kerr
+stationFilter <- '4AROA43.14'
+yearFilter <- 2012
+
+int_heatmap(kerr, stationFilter = '4AROA043.14', yearFilter = 2012, 
             stationCol = FDT_STA_ID,
             dateCol = Date, 
             depthCol = Depth, 
